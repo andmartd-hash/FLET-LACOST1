@@ -2,73 +2,71 @@ import flet as ft
 import pandas as pd
 import os
 
-# --- FUNCIÓN DE CARGA SEGURA ---
-def cargar_datos():
-    # Buscamos los archivos reales en la carpeta para evitar errores de nombre
-    archivos_presentes = os.listdir('.')
-    
-    # Mapeo de archivos basado en tus subidas
-    files_map = {
-        'countries': 'flet1-BASE.xlsx - countries.csv',
-        'risk': 'flet1-BASE.xlsx - risk.csv',
-        'offering': 'flet1-BASE.xlsx - offering.csv',
-        'slc': 'flet1-BASE.xlsx - slc.csv',
-        'lplat': 'flet1-BASE.xlsx - lplat.csv',
-        'lband': 'flet1-BASE.xlsx - lband.csv',
-        'ui': 'flet1-BASE.xlsx - UI_CONGIF.csv'
-    }
-
-    datos = {}
-    for key, name in files_map.items():
-        if name in archivos_presentes:
-            datos[key] = pd.read_csv(name)
-        else:
-            # Si no lo encuentra, crea un DataFrame vacío para que no explote la App
-            print(f"ALERTA: No se encontró {name}")
-            datos[key] = pd.DataFrame()
-    return datos
-
-# Cargamos globalmente antes de que inicie la App
-data = cargar_datos()
-
 def main(page: ft.Page):
-    page.title = "Cotizador Andresma - IBM"
-    page.scroll = "adaptive"
+    page.title = "IBM Pricing Tool - Andresma"
+    page.theme_mode = ft.ThemeMode.LIGHT
+    page.scroll = ft.ScrollMode.ADAPTIVE
 
-    # Verificar si df_countries existe en nuestro diccionario de datos
-    df_countries = data.get('countries', pd.DataFrame())
+    # --- 1. DETECCIÓN DINÁMICA DE ARCHIVOS ---
+    # Esto busca cualquier archivo que contenga la palabra clave en su nombre
+    archivos = os.listdir('.')
+    
+    def buscar_archivo(keyword):
+        for f in archivos:
+            if keyword.lower() in f.lower() and f.endswith('.csv'):
+                return f
+        return None
 
-    if df_countries.empty:
-        page.add(ft.Text("ERROR: No se cargaron los datos de países. Revisa los nombres de los archivos CSV.", color="red"))
+    # Intentamos cargar los dataframes
+    try:
+        file_countries = buscar_archivo('countries')
+        file_risk = buscar_archivo('risk')
+        file_ui = buscar_archivo('UI_CONGIF') # Nota: puse CONGIF por tu nombre de archivo
+
+        if not file_countries or not file_ui:
+            page.add(ft.Text(f"ERROR: No se encontró el archivo de países o configuración en: {archivos}", color="red"))
+            return
+
+        df_countries = pd.read_csv(file_countries)
+        df_ui = pd.read_csv(file_ui)
+        df_risk = pd.read_csv(file_risk) if file_risk else pd.DataFrame()
+
+    except Exception as e:
+        page.add(ft.Text(f"Error crítico de lectura: {e}", color="red"))
         return
 
-    # --- LÓGICA DE LA INTERFAZ ---
-    lista_paises = df_countries.columns[2:].tolist() if not df_countries.empty else []
+    # --- 2. COMPONENTES BASADOS EN TU ESTRUCTURA ---
+    # Extraemos la lista de países (columnas desde la 3ra en adelante según tu CSV)
+    lista_paises = df_countries.columns[2:].tolist()
     
-    dd_country = ft.Dropdown(
-        label="Selecciona País",
+    dd_paises = ft.Dropdown(
+        label="Seleccionar País (IBM Region)",
         options=[ft.dropdown.Option(p) for p in lista_paises],
         width=300
     )
 
-    def on_change_country(e):
-        # Ejemplo: obtener el ER (Exchange Rate) de la fila 1
-        try:
-            er_val = df_countries.loc[1, dd_country.value]
-            lbl_res.value = f"Exchange Rate para {dd_country.value}: {er_val}"
-        except:
-            lbl_res.value = "Error al obtener ER"
+    txt_er = ft.TextField(label="Exchange Rate (ER)", read_only=True, width=150)
+    
+    def cambio_pais(e):
+        # Según tu archivo, la fila 1 contiene el ER
+        # .loc[1] accede a la segunda fila (índice 1)
+        valor_er = df_countries.loc[1, dd_paises.value]
+        txt_er.value = str(valor_er)
         page.update()
 
-    dd_country.on_change = on_change_country
-    lbl_res = ft.Text("Selecciona un país para ver la lógica de IBM")
+    dd_paises.on_change = cambio_pais
 
+    # --- 3. DISEÑO DE LA PÁGINA ---
     page.add(
-        ft.Text("Configuración de Cotización", size=20, weight="bold"),
-        dd_country,
-        lbl_res
+        ft.Column([
+            ft.Text("CONFIGURACIÓN DE COTIZACIÓN", size=25, weight="bold"),
+            ft.Row([dd_paises, txt_er]),
+            ft.Divider(),
+            ft.Text("Estructura detectada de UI_CONGIF:", size=15, italic=True),
+            ft.Text(f"Campos principales: {', '.join(df_ui.columns[:5])}...")
+        ])
     )
 
 if __name__ == "__main__":
-    # Forzamos puerto 8080 para que GitHub lo detecte fácil
+    # Forzamos puerto 8080 para Codespaces
     ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8080)
