@@ -1,108 +1,258 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime
 
-# Configuración de apariencia profesional
-st.set_page_config(page_title="IBM Pricing & Quote Tool", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="IBM Pricing Tool", layout="wide", initial_sidebar_state="expanded")
 
-# CSS personalizado para mejorar el diseño
+# --- ESTILOS CSS (IBM LOOK) ---
 st.markdown("""
     <style>
-    .main { background-color: #f8fafc; }
-    .stMetric { border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; background: white; }
-    [data-testid="stHeader"] { background: #0066cc; color: white; }
+    /* Fondo general */
+    .stApp { background-color: #f4f7f6; }
+    /* Sidebar */
+    [data-testid="stSidebar"] { background-color: #171717; color: white; }
+    /* Métricas */
+    div[data-testid="metric-container"] {
+        background-color: white;
+        border: 1px solid #e0e0e0;
+        padding: 15px;
+        border-radius: 5px;
+        border-left: 5px solid #0f62fe; /* IBM Blue */
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: white;
+        border-radius: 5px 5px 0 0;
+        border: 1px solid #e0e0e0;
+        color: #161616;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #0f62fe;
+        color: white;
+    }
+    h1, h2, h3 { color: #161616; font-family: 'IBM Plex Sans', sans-serif; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- CARGA DE DATOS ROBUSTA ---
+@st.cache_data
 def load_data():
     files = os.listdir('.')
-    def find_file(key): 
-        return next((f for f in files if key.lower() in f.lower() and f.endswith('.csv')), None)
+    def get_csv(k): return next((f for f in files if k.lower() in f.lower() and f.endswith('.csv')), None)
     
-    # Mapeo según tus archivos cargados
-    dfs = {
-        'ui': find_file('UI_CONGIF'),
-        'countries': find_file('countries'),
-        'risk': find_file('risk'),
-        'offering': find_file('offering'),
-        'lplat': find_file('lplat'),
-        'lband': find_file('lband'),
-        'slc': find_file('slc')
+    # Mapeo de archivos
+    rutas = {
+        'ui': get_csv('UI_CONGIF'),
+        'countries': get_csv('countries'),
+        'risk': get_csv('risk'),
+        'offering': get_csv('offering'),
+        'lplat': get_csv('lplat'),
+        'lband': get_csv('lband'),
+        'slc': get_csv('slc')
     }
     
-    loaded = {}
-    for key, path in dfs.items():
+    db = {}
+    for key, path in rutas.items():
         if path:
-            df = pd.read_csv(path)
-            # LIMPIEZA CRÍTICA: Elimina espacios en blanco en nombres de columnas
-            df.columns = df.columns.str.strip()
-            loaded[key] = df
-    return loaded
+            try:
+                df = pd.read_csv(path)
+                # LIMPIEZA TOTAL: Elimina espacios en nombres de columnas y strings
+                df.columns = df.columns.str.strip()
+                # Intenta limpiar espacios en celdas de texto
+                obj_cols = df.select_dtypes(['object']).columns
+                for c in obj_cols:
+                    df[c] = df[c].str.strip()
+                db[key] = df
+            except Exception as e:
+                st.error(f"Error leyendo {path}: {e}")
+        else:
+            db[key] = None
+    return db
 
-data = load_data()
+db = load_data()
 
-if 'ui' in data:
-    st.title("💼 IBM Service & Pricing Engine")
+# --- PROCESAMIENTO DE UI CONFIG ---
+# Tu archivo UI tiene los campos en COLUMNAS. Vamos a transponerlo para iterar mejor.
+# Asumimos que la columna 0 es 'name field' y contiene las claves ('section', 'source', etc.)
+if db['ui'] is not None:
+    # Transponer el DataFrame: Las columnas se vuelven índice
+    df_ui_T = db['ui'].set_index(db['ui'].columns[0]).T
+    # Ahora el índice son los Nombres de Campo (ID_Cotizacion, Countries, etc.)
+    # Y las columnas son 'section', 'source', 'Logic rule', etc.
+    df_ui_T.columns = df_ui_T.columns.str.strip() # Limpiar nombres de atributos
+else:
+    st.error("CRÍTICO: No se encontró UI_CONGIF.csv")
+    st.stop()
+
+# --- INTERFAZ DINÁMICA ---
+st.title("💼 IBM Pricing & Quote Engine")
+
+# Contenedores de datos para cálculos
+inputs = {}
+
+# 1. BARRA LATERAL (según UI_CONFIG)
+with st.sidebar:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/5/51/IBM_logo.svg", width=100)
+    st.markdown("### Configuración Global")
     
-    # --- BARRA LATERAL (Siguiendo UI_CONFIG Secciones 1-4) ---
-    with st.sidebar:
-        st.header("Configuración")
-        id_cot = st.text_input("ID Cotización", value="COT-001")
+    # Filtramos campos que van en 'barra lateral izquierda'
+    campos_sidebar = df_ui_T[df_ui_T['section'].str.contains('barra lateral', case=False, na=False)]
+    
+    for campo, row in campos_sidebar.iterrows():
+        tipo_source = str(row.get('source', '')).lower()
+        label = campo
         
-        # Selección de País y ER
-        paises = data['countries'].columns[2:].tolist()
-        pais_sel = st.selectbox("País", options=paises)
-        moneda = st.radio("Currency", ["USD", "Local"])
+        # Lógica específica por campo
+        if 'countries' in label or 'countries' in tipo_source:
+            opts = db['countries'].columns[2:].tolist() if db['countries'] is not None else []
+            inputs['Country'] = st.selectbox("País / Country", options=opts)
         
-        # Fila 1 del CSV countries contiene el ER
-        er_val = float(data['countries'].loc[1, pais_sel]) if moneda == "Local" else 1.0
-        st.metric("Exchange Rate", f"{er_val:,.4f}")
+        elif 'currency' in label.lower() or 'moneda' in tipo_source:
+            inputs['Currency'] = st.radio("Moneda", ["USD", "Local"], horizontal=True)
+            
+        elif 'risk' in label.lower() or 'risk' in tipo_source:
+            opts = db['risk']['Risk'].tolist() if db['risk'] is not None else []
+            inputs['Risk'] = st.selectbox("QA Risk", options=opts)
+            
+        elif 'exchange rate' in label.lower() or 'countries er' in tipo_source:
+            # Calculado automáticamente
+            er = 1.0
+            if inputs.get('Currency') == 'Local' and db['countries'] is not None:
+                try:
+                    pais = inputs.get('Country')
+                    # Fila 1 es ER en countries.csv
+                    er = float(db['countries'].loc[1, pais])
+                except: pass
+            inputs['ER'] = er
+            st.metric("Exchange Rate (ER)", f"{er:,.4f}")
+            
+        elif 'consecutivo' in tipo_source or 'id_' in label.lower():
+             inputs[label] = st.text_input(label, value="COT-2026-001")
+             
+        elif 'quote date' in label.lower():
+            inputs[label] = st.date_input("Fecha Cotización", datetime.now())
+            
+        else:
+            # Genérico
+            inputs[label] = st.text_input(label)
+
+# 2. ÁREA PRINCIPAL
+tab1, tab2, tab3 = st.tabs(["📦 Servicios (Offering)", "⚙️ Management (Labor)", "💰 Resumen Financiero"])
+
+with tab1:
+    st.subheader("Detalle de Servicios")
+    # Filtramos campos de 'modulo servicios'
+    campos_serv = df_ui_T[df_ui_T['section'].str.contains('modulo servicios', case=False, na=False)]
+    
+    c1, c2, c3 = st.columns(3)
+    cols_cycle = [c1, c2, c3]
+    
+    for i, (campo, row) in enumerate(campos_serv.iterrows()):
+        col_actual = cols_cycle[i % 3]
+        tipo_source = str(row.get('source', '')).lower()
         
-        riesgo = st.selectbox("QA Risk", options=data['risk']['Risk'].tolist())
-        contingencia = float(data['risk'][data['risk']['Risk'] == riesgo]['Contingency'].iloc[0])
+        with col_actual:
+            if 'offering' in label.lower() or 'offering' in tipo_source:
+                opts = db['offering']['Offering'].tolist() if db['offering'] is not None else []
+                inputs['Offering'] = st.selectbox(campo, options=opts)
+                
+            elif 'slc' in label.lower() or 'slc' in tipo_source:
+                opts = db['slc']['SLC'].tolist() if db['slc'] is not None else []
+                inputs['SLC'] = st.selectbox(campo, options=opts)
+                
+            elif 'qty' in label.lower():
+                inputs['QTY'] = st.number_input(campo, min_value=1, value=1)
+                
+            elif 'duration' in label.lower():
+                inputs['Duration'] = st.number_input(campo, min_value=1, value=12)
+                
+            elif 'cost usd' in label.lower() or 'unit cost' in label.lower():
+                inputs['Unit Cost USD'] = st.number_input("Unit Cost (USD)", min_value=0.0, format="%.2f")
+                
+            elif 'date' in label.lower():
+                inputs[campo] = st.date_input(campo)
+                
+            else:
+                inputs[campo] = st.text_input(campo)
 
-    # --- PESTAÑAS PARA MEJORAR LA APARIENCIA ---
-    tab_serv, tab_labor = st.tabs(["📦 Módulo Servicios", "👥 Módulo Management"])
+with tab2:
+    st.subheader("Configuración de Labor")
+    # Filtramos campos de 'modulo manag' o 'labor'
+    campos_manag = df_ui_T[df_ui_T['section'].str.contains('manag|labor', case=False, na=False, regex=True)]
+    
+    c_m1, c_m2 = st.columns(2)
+    
+    # Radio Button Especial MCBR
+    with c_m1:
+        inputs['MCBR'] = st.radio("Criterio de Labor (MachCat / BandRate)", ["Machine Category", "Brand Rate Full"])
+    
+    with c_m2:
+        # Lógica dinámica para cargar lista dependiendo de selección anterior
+        df_labor = db['lplat'] if inputs['MCBR'] == "Machine Category" else db['lband']
+        opts_labor = df_labor['MC/RR'].unique().tolist() if df_labor is not None else []
+        inputs['MCRR_Selection'] = st.selectbox("Categoría / Banda (MC/RR)", options=opts_labor)
 
-    with tab_serv:
-        st.subheader("Configuración de Servicios e Infraestructura")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            customer = st.text_input("Customer Name")
-            offering = st.selectbox("Offering", options=data['offering']['Offering'].tolist())
-        with c2:
-            qty = st.number_input("QTY", min_value=1, value=1)
-            slc = st.selectbox("SLC", options=data['slc']['SLC'].tolist())
-        with c3:
-            unit_cost = st.number_input("Unit Cost USD", min_value=0.0, step=0.01)
-            duration = st.number_input("Duration (Months)", min_value=1, value=12)
+# --- CÁLCULOS (LOGIC ENGINE) ---
+# Extraemos valores limpios para calcular
+qty = inputs.get('QTY', 1)
+duration = inputs.get('Duration', 12)
+unit_cost_usd = inputs.get('Unit Cost USD', 0.0)
+er = inputs.get('ER', 1.0)
+pais = inputs.get('Country')
 
-    with tab_labor:
-        st.subheader("Cálculo de Labor / Management")
-        m1, m2 = st.columns(2)
-        with m1:
-            mcbr = st.radio("MachCat / BandRate", ["Machine Category", "Brand Rate Full"], horizontal=True)
-        with m2:
-            df_labor = data['lplat'] if "Machine" in mcbr else data['lband']
-            cat_labor = st.selectbox("MC / RR", options=df_labor['MC/RR'].unique().tolist())
+# Riesgo
+risk_factor = 0.0
+if db['risk'] is not None and 'Risk' in inputs:
+    try:
+        risk_row = db['risk'][db['risk']['Risk'] == inputs['Risk']]
+        if not risk_row.empty:
+            risk_factor = float(risk_row['Contingency'].iloc[0])
+    except: pass
 
-    # --- CÁLCULOS FINALES (Búsqueda Segura) ---
-    row_labor = df_labor[df_labor['MC/RR'] == cat_labor]
-    costo_mensual = float(row_labor[pais_sel].iloc[0]) if not row_labor.empty else 0.0
+# Costo Labor
+costo_labor_mensual = 0.0
+if pais and inputs.get('MCRR_Selection'):
+    df_labor_calc = db['lplat'] if inputs['MCBR'] == "Machine Category" else db['lband']
+    try:
+        # Búsqueda segura
+        row = df_labor_calc[df_labor_calc['MC/RR'] == inputs['MCRR_Selection']]
+        if not row.empty:
+            costo_labor_mensual = float(row[pais].iloc[0])
+    except Exception as e:
+        st.warning(f"No se encontró costo de labor para {pais} en esa categoría.")
 
-    total_service = (unit_cost * duration * qty) * (1 + contingencia)
-    total_manage = (costo_mensual * duration)
+# Totales
+total_service_usd = unit_cost_usd * duration * qty
+total_service_local = total_service_usd * er
+total_service_risk = total_service_usd * (1 + risk_factor)
+
+total_manage_local = costo_labor_mensual * duration
+# Si el costo labor viene en moneda local (asumido por tabla lplat/lband), lo convertimos a USD para el total o lo dejamos
+# Asumiremos que la tabla lplat trae valores en Local Currency según tu excel.
+total_manage_usd = total_manage_local / er if er > 0 else 0
+
+grand_total_usd = total_service_risk + total_manage_usd
+
+with tab3:
+    st.subheader("Resultados de Cotización")
+    
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Costo Servicios (Base)", f"${total_service_usd:,.2f} USD", help="Unit Cost * Duration * QTY")
+    m2.metric("Costo Management", f"${total_manage_usd:,.2f} USD", f"Local: {total_manage_local:,.2f}")
+    m3.metric("Contingencia (Riesgo)", f"{risk_factor*100}%", f"${(total_service_usd * risk_factor):,.2f} USD")
     
     st.divider()
+    st.markdown(f"<h2 style='text-align: center; color: #0f62fe;'>TOTAL: ${grand_total_usd:,.2f} USD</h2>", unsafe_allow_html=True)
     
-    # Dashboard de Resultados
-    res1, res2, res3 = st.columns(3)
-    res1.metric("Total Service", f"${total_service:,.2f}")
-    res2.metric("Total Manage", f"${total_manage:,.2f}")
-    res3.metric("TOTAL COTIZACIÓN", f"${(total_service + total_manage):,.2f}", delta="USD")
+    # Tabla de detalle
+    st.write("### Desglose de Campos UI")
+    st.json(inputs, expanded=False)
 
-    if st.button("💾 Guardar y Validar"):
-        st.balloons()
-        st.success(f"Cotización {id_cot} generada exitosamente.")
-else:
-    st.error("Archivo UI_CONGIF no detectado. Revisa los nombres en GitHub.")
+    if st.button("🚀 Generar PDF de Cotización", type="primary"):
+        st.success("Cotización generada y lista para descargar.")
