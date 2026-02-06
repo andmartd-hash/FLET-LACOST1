@@ -2,107 +2,107 @@ import streamlit as st
 import pandas as pd
 import os
 
-# Configuración de página estilo Dashboard Financiero
-st.set_page_config(page_title="IBM Quote Engine", layout="wide", initial_sidebar_state="expanded")
+# Configuración de apariencia profesional
+st.set_page_config(page_title="IBM Pricing & Quote Tool", layout="wide")
 
-# Estilo CSS para mejorar la apariencia (Bordes, sombras y fuentes)
+# CSS personalizado para mejorar el diseño
 st.markdown("""
     <style>
-    .main { background-color: #f5f7f9; }
-    .stMetric { background-color: #ffffff; padding: 15px; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-    [data-testid="stSidebar"] { background-color: #1e293b; color: white; }
+    .main { background-color: #f8fafc; }
+    .stMetric { border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; background: white; }
+    [data-testid="stHeader"] { background: #0066cc; color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-def load_all_data():
+def load_data():
     files = os.listdir('.')
-    def find(k): return next((f for f in files if k.lower() in f.lower() and f.endswith('.csv')), None)
+    def find_file(key): 
+        return next((f for f in files if key.lower() in f.lower() and f.endswith('.csv')), None)
     
-    data = {
-        'ui': pd.read_csv(find('UI_CONGIF')) if find('UI_CONGIF') else None,
-        'countries': pd.read_csv(find('countries')) if find('countries') else None,
-        'risk': pd.read_csv(find('risk')) if find('risk') else None,
-        'offering': pd.read_csv(find('offering')) if find('offering') else None,
-        'lplat': pd.read_csv(find('lplat')) if find('lplat') else None,
-        'lband': pd.read_csv(find('lband')) if find('lband') else None,
-        'slc': pd.read_csv(find('slc')) if find('slc') else None
+    # Mapeo según tus archivos cargados
+    dfs = {
+        'ui': find_file('UI_CONGIF'),
+        'countries': find_file('countries'),
+        'risk': find_file('risk'),
+        'offering': find_file('offering'),
+        'lplat': find_file('lplat'),
+        'lband': find_file('lband'),
+        'slc': find_file('slc')
     }
-    # Limpieza de nombres de columnas
-    for df in data.values():
-        if df is not None: df.columns = df.columns.str.strip()
-    return data
-
-data = load_all_data()
-
-if data['ui'] is not None:
-    st.title("📊 IBM Pricing & Service Tool")
     
-    # --- BARRA LATERAL (Siguiendo UI_CONFIG) ---
+    loaded = {}
+    for key, path in dfs.items():
+        if path:
+            df = pd.read_csv(path)
+            # LIMPIEZA CRÍTICA: Elimina espacios en blanco en nombres de columnas
+            df.columns = df.columns.str.strip()
+            loaded[key] = df
+    return loaded
+
+data = load_data()
+
+if 'ui' in data:
+    st.title("💼 IBM Service & Pricing Engine")
+    
+    # --- BARRA LATERAL (Siguiendo UI_CONFIG Secciones 1-4) ---
     with st.sidebar:
-        st.header("Configuración Base")
-        # El ID_Cotizacion y otros campos vienen de la fila 3 (test value) o manual
+        st.header("Configuración")
         id_cot = st.text_input("ID Cotización", value="COT-001")
         
-        lista_paises = data['countries'].columns[2:].tolist() if data['countries'] is not None else []
-        pais_sel = st.selectbox("País", options=lista_paises)
+        # Selección de País y ER
+        paises = data['countries'].columns[2:].tolist()
+        pais_sel = st.selectbox("País", options=paises)
+        moneda = st.radio("Currency", ["USD", "Local"])
         
-        moneda = st.selectbox("Currency", ["USD", "Local"])
+        # Fila 1 del CSV countries contiene el ER
+        er_val = float(data['countries'].loc[1, pais_sel]) if moneda == "Local" else 1.0
+        st.metric("Exchange Rate", f"{er_val:,.4f}")
         
-        # Lógica de Exchange Rate del archivo countries
-        er_val = 1.0
-        if moneda == "Local" and data['countries'] is not None:
-            er_val = float(data['countries'].loc[1, pais_sel])
-        st.metric("Exchange Rate", f"{er_val:,.2f}")
-        
-        riesgo = st.selectbox("QA Risk", options=data['risk']['Risk'].tolist() if data['risk'] is not None else ["Low"])
+        riesgo = st.selectbox("QA Risk", options=data['risk']['Risk'].tolist())
+        contingencia = float(data['risk'][data['risk']['Risk'] == riesgo]['Contingency'].iloc[0])
 
-    # --- CUERPO PRINCIPAL (Módulos de UI_CONFIG) ---
-    tabs = st.tabs(["Servicios e Infraestructura", "Módulo Management (Labor)", "Análisis Financiero"])
+    # --- PESTAÑAS PARA MEJORAR LA APARIENCIA ---
+    tab_serv, tab_labor = st.tabs(["📦 Módulo Servicios", "👥 Módulo Management"])
 
-    with tabs[0]:
-        st.subheader("Modulo Servicios")
+    with tab_serv:
+        st.subheader("Configuración de Servicios e Infraestructura")
         c1, c2, c3 = st.columns(3)
         with c1:
-            customer = st.text_input("Customer Name", placeholder="Ingrese cliente")
-            offering = st.selectbox("Offering", options=data['offering']['Offering'].tolist() if data['offering'] is not None else [])
+            customer = st.text_input("Customer Name")
+            offering = st.selectbox("Offering", options=data['offering']['Offering'].tolist())
         with c2:
             qty = st.number_input("QTY", min_value=1, value=1)
-            slc = st.selectbox("SLC", options=data['slc']['SLC'].tolist() if data['slc'] is not None else [])
+            slc = st.selectbox("SLC", options=data['slc']['SLC'].tolist())
         with c3:
-            unit_cost = st.number_input("Unit Cost USD", min_value=0.0, format="%.2f")
+            unit_cost = st.number_input("Unit Cost USD", min_value=0.0, step=0.01)
             duration = st.number_input("Duration (Months)", min_value=1, value=12)
 
-    with tabs[1]:
-        st.subheader("Modulo Managment")
+    with tab_labor:
+        st.subheader("Cálculo de Labor / Management")
         m1, m2 = st.columns(2)
         with m1:
             mcbr = st.radio("MachCat / BandRate", ["Machine Category", "Brand Rate Full"], horizontal=True)
         with m2:
             df_labor = data['lplat'] if "Machine" in mcbr else data['lband']
-            cat_labor = st.selectbox("MC / RR", options=df_labor['MC/RR'].unique().tolist() if df_labor is not None else [])
+            cat_labor = st.selectbox("MC / RR", options=df_labor['MC/RR'].unique().tolist())
 
-    # --- CÁLCULOS Y RESULTADOS ---
-    # Cálculo Labor (Búsqueda segura con iloc)
+    # --- CÁLCULOS FINALES (Búsqueda Segura) ---
     row_labor = df_labor[df_labor['MC/RR'] == cat_labor]
-    costo_mensual = 0.0
-    if not row_labor.empty:
-        costo_mensual = float(row_labor[pais_sel].iloc[0])
+    costo_mensual = float(row_labor[pais_sel].iloc[0]) if not row_labor.empty else 0.0
 
-    total_service = (unit_cost * duration * qty)
+    total_service = (unit_cost * duration * qty) * (1 + contingencia)
     total_manage = (costo_mensual * duration)
-    total_final = total_service + total_manage
-
+    
     st.divider()
     
-    # Mostrar resultados finales con estética mejorada
+    # Dashboard de Resultados
     res1, res2, res3 = st.columns(3)
-    res1.metric("Total Service Cost", f"${total_service:,.2f}")
-    res2.metric("Total Manage Cost", f"${total_manage:,.2f}")
-    res3.metric("TOTAL CONSOLIDADO", f"${total_final:,.2f}", delta="Cálculo Final", delta_color="normal")
+    res1.metric("Total Service", f"${total_service:,.2f}")
+    res2.metric("Total Manage", f"${total_manage:,.2f}")
+    res3.metric("TOTAL COTIZACIÓN", f"${(total_service + total_manage):,.2f}", delta="USD")
 
-    if st.button("💾 Guardar y Sincronizar con GitHub"):
+    if st.button("💾 Guardar y Validar"):
         st.balloons()
-        st.info(f"Cotización {id_cot} para {customer} procesada correctamente.")
-
+        st.success(f"Cotización {id_cot} generada exitosamente.")
 else:
-    st.error("No se pudo cargar el archivo UI_CONGIF. Verifica el repositorio.")
+    st.error("Archivo UI_CONGIF no detectado. Revisa los nombres en GitHub.")
