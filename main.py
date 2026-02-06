@@ -72,5 +72,7 @@ def main(page: ft.Page):
     )
 
 if __name__ == "__main__":
-    # Forzamos puerto 8080 para que Codespaces lo detecte automáticamente
-    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=8080)
+    import os
+    # Forzamos que corra en el puerto que GitHub espera
+    port = int(os.getenv("PORT", 8080))
+    ft.app(target=main, view=ft.AppView.WEB_BROWSER, port=port, host="0.0.0.0")
